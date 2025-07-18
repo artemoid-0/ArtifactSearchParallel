@@ -1,0 +1,3 @@
+[submodule "objective_signs/GAZE360_subm"]
+	path = objective_signs/GAZE360_subm
+	url = https://github.com/erkil1452/gaze360.git
