@@ -1,0 +1,13 @@
+/face_focus/faces_cropped_mtcnn_(test)/
+/face_focus/faces_cropped_mtcnn_(train)/
+/face_focus/problematic_images/
+/LEGACY/
+/objective_signs/GAZE360/gaze360/
+/objective_signs/GAZE360/gaze360_model.pth
+/objective_signs/GAZE360/gaze360_model.pth.tar
+/objective_signs/INFERENCE/gaze_viz_tol20/
+/objective_signs/INFERENCE/results/
+/objective_signs/MEDIAPIPELINE/results/
+/runs/
+/similarity_search/similar_pairs_vis/
+/similarity_search/similar_pairs.csv
