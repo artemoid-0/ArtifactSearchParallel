@@ -7,7 +7,11 @@
 /objective_signs/GAZE360/gaze360_model.pth.tar
 /objective_signs/INFERENCE/gaze_viz_tol20/
 /objective_signs/INFERENCE/results/
-/objective_signs/MEDIAPIPELINE/results/
+/objective_signs/MEDIAPIPE/results/
 /runs/
 /similarity_search/similar_pairs_vis/
 /similarity_search/similar_pairs.csv
+/objective_signs/GAZE360/gaze_360_results_(test)/
+/objective_signs/GAZE360/gaze_360_results_(train)/
+/objective_signs/INFERENCE/inference_results_(test)/
+/objective_signs/INFERENCE/inference_results_(train)/

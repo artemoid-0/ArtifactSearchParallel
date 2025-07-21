@@ -1,107 +1,117 @@
+# inference server start
+
 import os
 import cv2
 import numpy as np
 import pandas as pd
 from inference_sdk import InferenceHTTPClient
+from PIL import Image
+from tqdm import tqdm
 
-# === Parameters ===
+# === Параметры ===
+dataset_path = r"D:\DATASETS\artifact_dataset\train\\"
+output_dir = os.path.join(os.path.dirname(__file__), "inference_results_(train)")
+output_filename = "inference_results_(train).csv"
+tolerance_deg = 20
+
 API_URL = "http://localhost:9001"
 API_KEY = os.getenv("ROBOFLOW_API_KEY")
-IMAGE_FOLDER = r"D:\DATASETS\artifact_dataset\train"
-TOLERANCE_DEGREES = 20
-CSV_PATH = f"results/gaze_results_tol{TOLERANCE_DEGREES}.csv"
-VIZ_FOLDER = f"gaze_viz_tol{TOLERANCE_DEGREES}"
 
-# === Initialize client and output folder ===
 client = InferenceHTTPClient(api_url=API_URL, api_key=API_KEY)
-os.makedirs(VIZ_FOLDER, exist_ok=True)
+os.makedirs(output_dir, exist_ok=True)
 
-# === Gaze visualization ===
-def draw_gaze(img: np.ndarray, gaze: dict):
-    face = gaze["face"]
-    x_min = int(face["x"] - face["width"] / 2)
-    x_max = int(face["x"] + face["width"] / 2)
-    y_min = int(face["y"] - face["height"] / 2)
-    y_max = int(face["y"] + face["height"] / 2)
-    cv2.rectangle(img, (x_min, y_min), (x_max, y_max), (255, 0, 0), 3)
+# === Функция отрисовки взгляда ===
+def draw_gaze_arrow(original_img: np.ndarray, yaw: float, pitch: float, bbox=None):
+    img = original_img.copy()
+    h, w = img.shape[:2]
 
-    _, imgW = img.shape[:2]
-    arrow_length = imgW / 2
-    dx = -arrow_length * np.sin(gaze["yaw"]) * np.cos(gaze["pitch"])
-    dy = -arrow_length * np.sin(gaze["pitch"])
-    cv2.arrowedLine(
-        img,
-        (int(face["x"]), int(face["y"])),
-        (int(face["x"] + dx), int(face["y"] + dy)),
-        (0, 0, 255),
-        2,
-        cv2.LINE_AA,
-        tipLength=0.18,
-    )
+    if bbox is not None:
+        x1, y1, x2, y2 = map(int, bbox)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 0), 2)
+        center = ((x1 + x2) // 2, (y1 + y2) // 2)
+    else:
+        center = (w // 2, h // 2)
 
-    for keypoint in face["landmarks"]:
-        x, y = int(keypoint["x"]), int(keypoint["y"])
-        cv2.circle(img, (x, y), 2, (0, 255, 0), 2)
+    arrow_len = int(w * 0.4)
+    dx = -arrow_len * np.sin(yaw) * np.cos(pitch)
+    dy = -arrow_len * np.sin(pitch)
+    end_point = (int(center[0] + dx), int(center[1] + dy))
 
-    label = f"yaw {gaze['yaw']:.2f}  pitch {gaze['pitch']:.2f}"
-    cv2.putText(img, label, (x_min, y_min - 10), cv2.FONT_HERSHEY_PLAIN, 2, (0, 255, 0), 2)
+    cv2.arrowedLine(img, center, end_point, (0, 0, 255), 2, cv2.LINE_AA, tipLength=0.2)
 
-# === Results list ===
+    yaw_deg = np.degrees(yaw)
+    pitch_deg = np.degrees(pitch)
+    label = f"yaw: {yaw_deg:.1f} deg, pitch: {pitch_deg:.1f} deg"
+    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+    cv2.rectangle(img, (10, 10), (10 + tw + 10, 10 + th + 10), (0, 0, 0), -1)
+    cv2.putText(img, label, (15, 10 + th), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+    return img
+
+# === CSV для записи результатов ===
 results = []
 
-# === Process images ===
-for root, _, files in os.walk(IMAGE_FOLDER):
-    for file in files:
-        if not file.lower().endswith((".jpg", ".jpeg", ".png")):
-            continue
+# === Получение всех файлов ===
+image_names = [f for f in os.listdir(dataset_path) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
 
-        full_path = os.path.join(root, file)
-        try:
-            image = cv2.imread(full_path)
-            if image is None:
-                raise ValueError("Image load error")
+# === Обработка изображений ===
+for image_name in tqdm(image_names, desc="Processing images"):
+    try:
+        image_path = os.path.join(dataset_path, image_name)
+        img_pil = Image.open(image_path).convert("RGB")
+        image_np = np.array(img_pil)
+        image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
 
-            rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            gaze_result = client.detect_gazes(inference_input=rgb_image)
+        # Предсказание
+        gaze_result = client.detect_gazes(image_np)
 
-            if not gaze_result or not gaze_result[0]["predictions"]:
-                yaw_deg, pitch_deg, verdict = None, None, "❌ Face not found"
-            else:
-                prediction = gaze_result[0]["predictions"][0]
-                yaw_rad = prediction["yaw"]
-                pitch_rad = prediction["pitch"]
+        if not gaze_result or not gaze_result[0]["predictions"]:
+            raise ValueError("Face not found")
 
-                yaw_deg = np.degrees(yaw_rad)
-                pitch_deg = np.degrees(pitch_rad)
-                is_forward = abs(yaw_deg) < TOLERANCE_DEGREES and abs(pitch_deg) < TOLERANCE_DEGREES
-                verdict = "✔️ Looking at camera" if is_forward else "❌ Not looking at camera"
+        prediction = gaze_result[0]["predictions"][0]
+        yaw_rad = prediction["yaw"]
+        pitch_rad = prediction["pitch"]
 
-                # Visualization and saving
-                draw_gaze(image, prediction)
-                save_path = os.path.join(VIZ_FOLDER, os.path.relpath(full_path, IMAGE_FOLDER))
-                os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                cv2.imwrite(save_path, image)
+        face = prediction.get("face")
+        if face:
+            x = face.get("x")
+            y = face.get("y")
+            width = face.get("width")
+            height = face.get("height")
+            x1 = int(x - width / 2)
+            y1 = int(y - height / 2)
+            x2 = int(x + width / 2)
+            y2 = int(y + height / 2)
+            bbox = (x1, y1, x2, y2)
+        else:
+            bbox = None
+            x1 = y1 = x2 = y2 = np.nan
 
-            results.append({
-                "image_path": os.path.relpath(full_path, IMAGE_FOLDER),
-                "yaw_deg": yaw_deg,
-                "pitch_deg": pitch_deg,
-                "verdict": verdict
-            })
+        # Визуализация
+        viz_img = draw_gaze_arrow(image_bgr, yaw_rad, pitch_rad, bbox=bbox)
+        cv2.imwrite(os.path.join(output_dir, f"viz_{image_name}"), viz_img)
 
-            print(f"{file}: {verdict} ({yaw_deg=:.1f}°, {pitch_deg=:.1f}°)" if yaw_deg is not None else f"{file}: {verdict}")
+        results.append({
+            "file": image_name,
+            "status": "success",
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+            "yaw_rad": float(yaw_rad),
+            "pitch_rad": float(pitch_rad),
+            "yaw_deg": float(np.degrees(yaw_rad)),
+            "pitch_deg": float(np.degrees(pitch_rad)),
+        })
 
-        except Exception as e:
-            print(f"[ERROR] {file}: {e}")
-            results.append({
-                "image_path": os.path.relpath(full_path, IMAGE_FOLDER),
-                "yaw_deg": None,
-                "pitch_deg": None,
-                "verdict": f"❌ Error: {str(e)}"
-            })
+    except Exception as e:
+        print(f"⚠️ Ошибка при обработке {image_name}: {e}")
+        results.append({
+            "file": image_name,
+            "status": "failure",
+            "x1": np.nan, "y1": np.nan, "x2": np.nan, "y2": np.nan,
+            "yaw_rad": np.nan, "pitch_rad": np.nan,
+            "yaw_deg": np.nan, "pitch_deg": np.nan,
+        })
 
-# === Save CSV ===
-df = pd.DataFrame(results)
-df.to_csv(CSV_PATH, index=False, encoding='utf-8-sig')
-print(f"\n✅ Results saved to: {CSV_PATH}")
-print(f"✅ Visualizations saved to: {VIZ_FOLDER}")
+# === Сохранение итогового CSV ===
+results_csv_path = os.path.join(os.path.dirname(__file__), output_filename)
+pd.DataFrame(results).to_csv(results_csv_path, index=False)
+print(f"\n✅ Готово! Результаты в: {output_dir}")

@@ -1,13 +1,14 @@
 import os
+import csv
 from PIL import Image
 from facenet_pytorch import MTCNN
 import torch
 
 # === Paths ===
-input_dir = r"D:\DATASETS\artifact_dataset\train"
-alternative = ""
+input_dir = r"D:\DATASETS\artifact_dataset\bad_images\train_bad\not found\\"
+output_dir = r"faces_cropped_mtcnn_(train_bad)"
+csv_path = "mtcnn_crop_log_(train_bad).csv"
 
-output_dir = r"faces_cropped_mtcnn_(train)"
 os.makedirs(output_dir, exist_ok=True)
 
 # === Device ===
@@ -15,24 +16,19 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print(f"Using device: {device}")
 
 # === MTCNN initialization ===
-mtcnn = MTCNN(keep_all=False, thresholds=[0.4, 0.5, 0.5], min_face_size=150, factor=0.6, device=device)
+mtcnn = MTCNN(
+    keep_all=False,
+    device=device
+)
 
-# === Global margin settings (can be adjusted) ===
+# === Global margin settings ===
 default_margin = 0.25
 top_margin = 0.0
 bottom_margin = 0.075
 left_margin = None
 right_margin = None
 
-def crop_with_margin(
-    img,
-    box,
-    margin=0.25,
-    top=None,
-    bottom=None,
-    left=None,
-    right=None
-):
+def crop_with_margin(img, box, margin=0.25, top=None, bottom=None, left=None, right=None):
     x1, y1, x2, y2 = box
     w = x2 - x1
     h = y2 - y1
@@ -58,7 +54,11 @@ def make_square(img):
     new_img.paste(img, (paste_x, paste_y))
     return new_img
 
-# === Process all images ===
+# === Prepare CSV logging ===
+csv_rows = []
+csv_header = ["file", "status", "x1", "y1", "x2", "y2"]
+
+# === Process images ===
 for root, dirs, files in os.walk(input_dir):
     for file in files:
         if not file.lower().endswith(('.jpg', '.jpeg', '.png', '.bmp')):
@@ -69,8 +69,13 @@ for root, dirs, files in os.walk(input_dir):
 
         boxes, _ = mtcnn.detect(img)
 
+        rel_path = os.path.relpath(root, input_dir)
+        save_folder = os.path.join(output_dir, rel_path)
+        os.makedirs(save_folder, exist_ok=True)
+
         if boxes is None:
             print(f"❌ Face not found: {file}")
+            csv_rows.append([os.path.join(rel_path, file), "not_found", None, None, None, None])
             continue
 
         box = boxes[0]
@@ -85,10 +90,18 @@ for root, dirs, files in os.walk(input_dir):
         )
         squared = make_square(cropped)
 
-        rel_path = os.path.relpath(root, input_dir)
-        save_folder = os.path.join(output_dir, rel_path)
-        os.makedirs(save_folder, exist_ok=True)
-
         save_path = os.path.join(save_folder, file)
         squared.save(save_path)
         print(f"✅ Saved: {save_path}")
+
+        # Log bounding box
+        x1, y1, x2, y2 = [round(float(v), 2) for v in box]
+        csv_rows.append([os.path.join(rel_path, file), "success", x1, y1, x2, y2])
+
+# === Write CSV ===
+with open(csv_path, mode="w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(csv_header)
+    writer.writerows(csv_rows)
+
+print(f"\n📄 CSV лог сохранён: {os.path.abspath(csv_path)}")

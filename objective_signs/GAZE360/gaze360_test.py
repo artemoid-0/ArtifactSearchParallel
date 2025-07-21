@@ -2,88 +2,112 @@ import torch
 import torchvision.transforms as transforms
 import cv2
 import numpy as np
+import pandas as pd
 from PIL import Image
 from gaze360.code.model import GazeLSTM
+import os
+from tqdm import tqdm
 
-# Load model
+# === Параметры ===
+dataset_path = r"D:\DATASETS\artifact_dataset\train\\"
+bbox_csv_path = "../../face_focus/GOOD_RESERVE/mtcnn_crop_log_(train).csv"  # ← Путь к CSV с координатами лиц
+output_dir = os.path.join(os.path.dirname(__file__), "results_(train)")
+results_csv_path = os.path.join(os.path.dirname(__file__), "gaze360_results_(train).csv")
+os.makedirs(output_dir, exist_ok=True)
+
+# === Модель взгляда ===
 model = GazeLSTM()
 state_dict = torch.load("gaze360_model.pth.tar")["state_dict"]
-
-# Remove "module." and rename "fc1" to "fc" if needed
-new_state_dict = {}
-for k, v in state_dict.items():
-    k = k.replace("module.", "")
-    new_state_dict[k] = v
-
-model.load_state_dict(new_state_dict)
+model.load_state_dict({k.replace("module.", ""): v for k, v in state_dict.items()})
 model.eval()
 
+# === Трансформация для gaze360 ===
 transform = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor()
 ])
 
-dataset_path = r"D:\DATASETS\artifact_dataset\train\\"
-image_path = dataset_path + "image_00042_1.png"
-img = Image.open(image_path).convert("RGB")
-img_tensor = transform(img)
+# === Функция визуализации взгляда + bbox ===
+def draw_gaze_arrow(original_img: np.ndarray, theta: float, phi: float, bbox=None):
+    img = original_img.copy()
+    h, w = img.shape[:2]
 
-# Repeat image to form a sequence: [1, 7, 3, 224, 224]
-img_sequence = img_tensor.unsqueeze(0).repeat(7, 1, 1, 1)
-img_sequence = img_sequence.unsqueeze(0)
+    if bbox is not None:
+        x1, y1, x2, y2 = map(int, bbox)
+        cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 0), 2)
 
-with torch.no_grad():
-    angular_output, var = model(img_sequence)
-    theta, phi = angular_output[0].cpu().numpy()
-    sigma = var[0, 0].cpu().item()
+    center = ((x1 + x2) // 2, (y1 + y2) // 2) if bbox else (w // 2, h // 2)
 
+    arrow_len = int(w * 0.4)
+    dx = -arrow_len * np.sin(theta) * np.cos(phi)
+    dy = -arrow_len * np.sin(phi)
+    end_point = (int(center[0] + dx), int(center[1] + dy))
 
-def interpret_gaze(theta_rad, phi_rad, sigma):
-    theta_deg = np.degrees(theta_rad)
-    phi_deg = np.degrees(phi_rad)
+    cv2.arrowedLine(img, center, end_point, (0, 0, 255), 2, cv2.LINE_AA, tipLength=0.2)
 
-    if sigma < 0.3:
-        confidence = "high confidence"
-    elif sigma < 0.6:
-        confidence = "moderate confidence"
-    else:
-        confidence = "low confidence"
+    # Текст с фоном
+    yaw_deg = np.degrees(theta)
+    pitch_deg = np.degrees(phi)
+    label = f"yaw: {yaw_deg:.1f} deg, pitch: {pitch_deg:.1f} deg"
+    (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)
+    cv2.rectangle(img, (10, 10), (10 + tw + 10, 10 + th + 10), (0, 0, 0), -1)
+    cv2.putText(img, label, (15, 10 + th), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
-    if theta_deg < -10:
-        rel_person_horizontal = "looking to their LEFT"
-    elif theta_deg > 10:
-        rel_person_horizontal = "looking to their RIGHT"
-    else:
-        rel_person_horizontal = "looking straight (horizontally)"
+    return img
 
-    if phi_deg < -10:
-        rel_person_vertical = "looking down"
-    elif phi_deg > 10:
-        rel_person_vertical = "looking up"
-    else:
-        rel_person_vertical = "looking straight (vertically)"
+# === Загрузка координат лиц ===
+bbox_df = pd.read_csv(bbox_csv_path)
+bbox_df["file"] = bbox_df["file"].apply(lambda x: os.path.basename(x))
 
-    if theta_deg < -10:
-        rel_camera_horizontal = "looking right (from the camera's perspective)"
-    elif theta_deg > 10:
-        rel_camera_horizontal = "looking left (from the camera's perspective)"
-    else:
-        rel_camera_horizontal = "looking directly at the camera (horizontally)"
+# === CSV для записи результатов ===
+results = []
 
-    if phi_deg < -10:
-        rel_camera_vertical = "looking down (from the camera's perspective)"
-    elif phi_deg > 10:
-        rel_camera_vertical = "looking up (from the camera's perspective)"
-    else:
-        rel_camera_vertical = "looking directly at the camera (vertically)"
+# === Обработка изображений ===
+for _, row in tqdm(bbox_df.iterrows(), total=len(bbox_df), desc="Processing images"):
+    image_name = row["file"]
+    status = row["status"]
 
-    print(f"Gaze angles:")
-    print(f"  θ (left/right): {theta_rad:.2f} rad / {theta_deg:.1f}°")
-    print(f"  φ (up/down): {phi_rad:.2f} rad / {phi_deg:.1f}°")
-    print(f"  Uncertainty (sigma): {sigma:.2f} — {confidence}")
-    print()
-    print(f"Relative to person: {rel_person_horizontal}, {rel_person_vertical}")
-    print(f"Relative to camera: {rel_camera_horizontal}, {rel_camera_vertical}")
+    if status != "success":
+        print(f"⛔ Пропуск {image_name}: статус {status}")
+        continue
 
+    try:
+        image_path = os.path.join(dataset_path, image_name)
+        img_pil = Image.open(image_path).convert("RGB")
 
-interpret_gaze(theta, phi, sigma)
+        x1, y1, x2, y2 = map(int, [row["x1"], row["y1"], row["x2"], row["y2"]])
+        face_crop = img_pil.crop((x1, y1, x2, y2))
+
+        # Подготовка входа
+        img_tensor = transform(face_crop)
+        img_sequence = img_tensor.unsqueeze(0).repeat(7, 1, 1, 1).unsqueeze(0)
+
+        # Предсказание
+        with torch.no_grad():
+            angular_output, _ = model(img_sequence)
+            theta, phi = angular_output[0].cpu().numpy()
+
+        # Визуализация
+        img_cv2 = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+        viz_img = draw_gaze_arrow(img_cv2, theta, phi, bbox=(x1, y1, x2, y2))
+
+        # Сохранение изображения
+        output_path = os.path.join(output_dir, f"viz_{image_name}")
+        cv2.imwrite(output_path, viz_img)
+
+        # Сохранение в CSV
+        results.append({
+            "file": image_name,
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+            "yaw_rad": float(theta),
+            "pitch_rad": float(phi),
+            "yaw_deg": float(np.degrees(theta)),
+            "pitch_deg": float(np.degrees(phi)),
+        })
+
+    except Exception as e:
+        print(f"❌ Ошибка при обработке {image_name}: {e}")
+
+# === Сохранение итогового CSV ===
+pd.DataFrame(results).to_csv(results_csv_path, index=False)
+print(f"\n✅ Готово! Результаты в: {output_dir}")

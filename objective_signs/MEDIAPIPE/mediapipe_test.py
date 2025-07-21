@@ -6,8 +6,8 @@ mp_face_mesh = mp.solutions.face_mesh
 mp_drawing = mp.solutions.drawing_utils
 
 # Load image
-dataset_path = r"D:\DATASETS\artifact_dataset\train\\"
-image_path = dataset_path + "image_00295_0.png"
+dataset_path = r"D:\DATASETS\artifact_dataset\test\\"
+image_path = dataset_path + "image_00041_0.png"
 image = cv2.imread(image_path)
 image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
