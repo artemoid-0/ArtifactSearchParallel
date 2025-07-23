@@ -8,7 +8,7 @@ from inference_sdk import InferenceHTTPClient
 from PIL import Image
 from tqdm import tqdm
 
-# === Параметры ===
+# === Parameters ===
 dataset_path = r"D:\DATASETS\artifact_dataset\train\\"
 output_dir = os.path.join(os.path.dirname(__file__), "inference_results_(train)")
 output_filename = "inference_results_(train).csv"
@@ -20,7 +20,7 @@ API_KEY = os.getenv("ROBOFLOW_API_KEY")
 client = InferenceHTTPClient(api_url=API_URL, api_key=API_KEY)
 os.makedirs(output_dir, exist_ok=True)
 
-# === Функция отрисовки взгляда ===
+# === Function to draw gaze ===
 def draw_gaze_arrow(original_img: np.ndarray, yaw: float, pitch: float, bbox=None):
     img = original_img.copy()
     h, w = img.shape[:2]
@@ -48,13 +48,13 @@ def draw_gaze_arrow(original_img: np.ndarray, yaw: float, pitch: float, bbox=Non
 
     return img
 
-# === CSV для записи результатов ===
+# === CSV for saving results ===
 results = []
 
-# === Получение всех файлов ===
+# === Get all files ===
 image_names = [f for f in os.listdir(dataset_path) if f.lower().endswith((".png", ".jpg", ".jpeg"))]
 
-# === Обработка изображений ===
+# === Image processing ===
 for image_name in tqdm(image_names, desc="Processing images"):
     try:
         image_path = os.path.join(dataset_path, image_name)
@@ -62,7 +62,7 @@ for image_name in tqdm(image_names, desc="Processing images"):
         image_np = np.array(img_pil)
         image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
 
-        # Предсказание
+        # Prediction
         gaze_result = client.detect_gazes(image_np)
 
         if not gaze_result or not gaze_result[0]["predictions"]:
@@ -87,7 +87,7 @@ for image_name in tqdm(image_names, desc="Processing images"):
             bbox = None
             x1 = y1 = x2 = y2 = np.nan
 
-        # Визуализация
+        # Visualization
         viz_img = draw_gaze_arrow(image_bgr, yaw_rad, pitch_rad, bbox=bbox)
         cv2.imwrite(os.path.join(output_dir, f"viz_{image_name}"), viz_img)
 
@@ -102,7 +102,7 @@ for image_name in tqdm(image_names, desc="Processing images"):
         })
 
     except Exception as e:
-        print(f"⚠️ Ошибка при обработке {image_name}: {e}")
+        print(f"⚠️ Error processing {image_name}: {e}")
         results.append({
             "file": image_name,
             "status": "failure",
@@ -111,7 +111,7 @@ for image_name in tqdm(image_names, desc="Processing images"):
             "yaw_deg": np.nan, "pitch_deg": np.nan,
         })
 
-# === Сохранение итогового CSV ===
+# === Save final CSV ===
 results_csv_path = os.path.join(os.path.dirname(__file__), output_filename)
 pd.DataFrame(results).to_csv(results_csv_path, index=False)
-print(f"\n✅ Готово! Результаты в: {output_dir}")
+print(f"\n✅ Done! Results saved to: {output_dir}")

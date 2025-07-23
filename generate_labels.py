@@ -1,16 +1,15 @@
 import os
 import csv
 
-
 def generate_labels_csv_from_filenames(image_dir, filename_to_label, label_id_to_name, output_csv_path):
     """
-    Генерирует CSV-файл с метками изображений на основе имени файла.
+    Generates a CSV file with image labels based on file names.
 
     Parameters:
-        image_dir (str): путь к папке с изображениями (.png)
-        filename_to_label (dict): словарь {имя_файла: метка (int)}
-        label_id_to_name (dict): словарь {метка (int): текстовое имя класса (str)}
-        output_csv_path (str): путь к выходному CSV
+        image_dir (str): path to the folder containing the images (.png)
+        filename_to_label (dict): dictionary {filename: label (int)}
+        label_id_to_name (dict): dictionary {label (int): human-readable class name (str)}
+        output_csv_path (str): path to the output CSV file
     """
     rows = []
 
@@ -18,13 +17,13 @@ def generate_labels_csv_from_filenames(image_dir, filename_to_label, label_id_to
         if not fname.endswith(".png"):
             continue
 
-        # Получаем метку: если файла нет в словаре — по умолчанию 0
+        # Get the label: if the file is not in the dictionary, default to 0
         label = filename_to_label.get(fname, 0)
         label_name = label_id_to_name.get(label, f"class_{label}")
 
         rows.append((fname, label, label_name))
 
-    # Сохраняем CSV
+    # Save to CSV
     with open(output_csv_path, 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerow(['image', 'label', 'label_name'])
@@ -32,11 +31,11 @@ def generate_labels_csv_from_filenames(image_dir, filename_to_label, label_id_to
 
     print(f"CSV saved to {output_csv_path} ({len(rows)} entries)")
 
-
+# Paths to the image directories
 train_dir = r"D:\DATASETS\artifact_dataset\train"
 test_dir = r"D:\DATASETS\artifact_dataset\test"
 
-# Метки для изображений в train (только те, что не "clean")
+# Labels for images in train (only those that are not "clean")
 train_filename_to_label = {
     "image_00002_0.png": 1,
     "image_00005_0.png": 1,
@@ -197,7 +196,7 @@ train_filename_to_label = {
     "image_01799_0.png": 1,
 }
 
-# Метки для изображений в test
+# Labels for images in test
 test_filename_to_label = {
     "image_00003_0.png": 1,
     "image_00011_0.png": 1,
@@ -218,13 +217,13 @@ test_filename_to_label = {
     "image_00167_0.png": 1,
 }
 
-# Отображение числовых меток на человеко-понятные названия
+# Mapping label IDs to human-readable names
 label_id_to_name = {
     0: "clean",
     1: "object",
     # 2: "shadow"
 }
 
-# Генерация
+# Generate CSV labels
 generate_labels_csv_from_filenames(train_dir, train_filename_to_label, label_id_to_name, "train_labels.csv")
 generate_labels_csv_from_filenames(test_dir, test_filename_to_label, label_id_to_name, "test_labels.csv")
